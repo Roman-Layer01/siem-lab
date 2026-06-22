@@ -195,3 +195,62 @@ Invoke-WebRequest http://example.com
 - Expand detection coverage for additional attack techniques
 - Continue refining rules to reduce false positives
 ``
+
+---
+
+### 🔹 PowerShell Child Process Detection (4688)
+
+Test Command:
+```powershell
+powershell.exe -NoProfile -Command "whoami"
+```
+
+---
+
+### ✅ Observed Behavior
+
+- PowerShell executed a command that launched another process (`whoami.exe`)
+- Event ID 4688 captured the process creation
+- The spawned process (`whoami.exe`) shows PowerShell as its parent
+
+Example:
+
+```text
+process.name: whoami.exe
+process.parent.name: powershell.exe
+```
+
+---
+
+### ✅ Detection Query
+
+```kql
+event.code: "4688" and process.parent.name: "powershell.exe"
+```
+
+---
+
+### ✅ Key Concept
+
+- A **child process** is a process created by another process (parent)
+- In this case:
+  - **PowerShell = parent process**
+  - **whoami.exe = child process**
+
+- “PowerShell spawning a child process” means:
+  > PowerShell executed a command that launched another executable
+
+---
+
+### ✅ Why This Matters
+
+- Attackers often use PowerShell to launch additional tools or payloads
+- Monitoring child processes helps detect:
+  - command execution
+  - lateral movement behavior
+  - potential malware activity
+
+- Detection focuses on:
+  > “What did PowerShell cause to run?”
+
+---
