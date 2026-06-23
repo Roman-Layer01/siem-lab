@@ -268,3 +268,107 @@ The activity was confirmed via Script Block Logging (4104), supported by process
 - Detect encoded PowerShell using Event ID 4688
 - Correlate multiple log sources automatically
 - Integrate Pi-hole logs into Elastic for full pipeline detection
+
+## Raspberry Pi Network Monitoring & Alerting Lab
+
+### Overview
+Built a lightweight network monitoring and alerting solution using a Raspberry Pi to simulate a basic network detection sensor. The goal was to detect new devices joining the local network and generate real-time alerts, similar to how SOC environments monitor network activity.
+
+---
+
+### Objectives
+- Gain hands-on experience with network discovery and asset enumeration
+- Build detection logic to identify new or unauthorized devices
+- Implement basic alerting using SMTP (email notifications)
+- Understand alert noise and the need for tuning
+
+---
+
+### Tools & Technologies
+- Raspberry Pi 5 (Ubuntu/Debian-based OS)
+- `arp-scan` (network discovery)
+- Bash scripting
+- `msmtp` / SMTP (email alerting)
+
+---
+
+### Implementation
+
+#### 1. Network Discovery
+Used `arp-scan` to enumerate devices on the local network:
+```bash
+sudo arp-scan --localnet
+```
+
+#### 2. Baseline Creation
+Captured an initial snapshot of known devices:
+```bash
+./detect.sh   # first run creates baseline.txt
+```
+
+#### 3. Detection Logic
+Compared current scan results to baseline using diff logic:
+- New devices identified by IP/MAC comparison
+- Utilized `comm` and sorting to isolate new entries
+
+#### 4. Alerting
+Integrated SMTP email alerts using `msmtp`:
+- Configured Gmail SMTP with app password
+- Triggered alerts when new devices were detected
+
+Example alert:
+```
+🚨 New device detected:
+
+10.0.0.100 9a:f3:47:cb:3c:57
+```
+
+---
+
+### Detection Script
+
+```bash
+#!/bin/bash
+
+BASELINE="baseline.txt"
+CURRENT="current.txt"
+
+# Run scan (clean output)
+sudo arp-scan --localnet 2>/dev/null | grep -E "^[0-9]" > $CURRENT
+
+# Create baseline if it doesn't exist
+if [ ! -f "$BASELINE" ]; then
+    cp $CURRENT $BASELINE
+    echo "Baseline created."
+    exit 0
+fi
+
+# Find NEW devices
+NEW=$(comm -13 <(sort $BASELINE) <(sort $CURRENT))
+
+if [ -n "$NEW" ]; then
+    echo "🚨 NEW DEVICE DETECTED!"
+    echo "$NEW"
+
+    echo -e "🚨 New device detected:\n\n$NEW" | mail -s "Network Alert 🚨" your-email@gmail.com
+
+    # Update baseline
+    cp $CURRENT $BASELINE
+fi
+```
+
+---
+
+### Key Takeaways
+- Built a simple detection pipeline: **data collection → analysis → alerting**
+- Learned how network devices can use randomized MAC addresses (locally administered MACs)
+- Identified challenges with alert noise and need for filtering/tuning
+- Gained practical understanding of how SOC tools detect and alert on network changes
+
+---
+
+### Future Improvements
+- Filter known devices to reduce alert noise
+- Add device labeling (known assets vs unknown)
+- Send logs to Elastic for centralized analysis
+- Replace polling with event-driven monitoring (if applicable)
